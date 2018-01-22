@@ -8,6 +8,7 @@ import sys
 
 import torch
 import torchtext
+from allennlp.data.token_indexers.elmo_indexer import ELMoCharacterMapper
 
 from onmt.Utils import aeq
 from onmt.io.DatasetBase import ONMTDatasetBase, PAD_WORD, BOS_WORD, EOS_WORD
@@ -31,13 +32,14 @@ class TextDataset(ONMTDatasetBase):
             src_seq_length (int): maximum source sequence length.
             tgt_seq_length (int): maximum target sequence length.
             dynamic_dict (bool): create dynamic dictionaries?
+            character_ids (bool): create character ids?
             use_filter_pred (bool): use a custom filter predicate to filter
                 out examples?
     """
     def __init__(self, fields, src_examples_iter, tgt_examples_iter,
                  num_src_feats=0, num_tgt_feats=0,
                  src_seq_length=0, tgt_seq_length=0,
-                 dynamic_dict=True, use_filter_pred=True):
+                 dynamic_dict=True, character_ids=False, use_filter_pred=True):
         self.data_type = 'text'
 
         # self.src_vocabs: mutated in dynamic_dict, used in
@@ -58,6 +60,9 @@ class TextDataset(ONMTDatasetBase):
 
         if dynamic_dict:
             examples_iter = self._dynamic_dict(examples_iter)
+
+        if character_ids:
+            examples_iter = self._character_ids(examples_iter)
 
         # Peek at the first to see which fields are used.
         ex, examples_iter = self._peek(examples_iter)
@@ -216,6 +221,14 @@ class TextDataset(ONMTDatasetBase):
                 alignment[:sent.size(0), i] = sent
             return alignment
 
+        def make_char(data, vocab, is_train):
+            src_size = max([t.size(0) for t in data])
+            character_ids = torch.LongTensor(len(data), src_size, data[0].size(1))
+            character_ids.fill_(0)
+            for i, sent in enumerate(data):
+                character_ids[i][:sent.size(0)] = sent
+            return character_ids
+
         fields["alignment"] = torchtext.data.Field(
             use_vocab=False, tensor_type=torch.LongTensor,
             postprocessing=make_tgt, sequential=False)
@@ -223,6 +236,10 @@ class TextDataset(ONMTDatasetBase):
         fields["indices"] = torchtext.data.Field(
             use_vocab=False, tensor_type=torch.LongTensor,
             sequential=False)
+
+        fields["character_ids"] = torchtext.data.Field(
+            use_vocab=False, tensor_type=torch.LongTensor,
+            sequential=False, postprocessing=make_char)
 
         return fields
 
@@ -262,6 +279,18 @@ class TextDataset(ONMTDatasetBase):
                 mask = torch.LongTensor(
                         [0] + [src_vocab.stoi[w] for w in tgt] + [0])
                 example["alignment"] = mask
+            yield example
+
+    # Below are helper functions for intra-class use only.
+    def _character_ids(self, examples_iter):
+        for example in examples_iter:
+            src = example["src"]
+            character_ids = []
+            for i, word in enumerate(src):
+                char_id = ELMoCharacterMapper.convert_word_to_char_ids(word)
+                character_ids.append(char_id)
+            character_ids = torch.LongTensor(character_ids)
+            example['character_ids'] = character_ids
             yield example
 
 

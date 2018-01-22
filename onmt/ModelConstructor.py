@@ -5,6 +5,8 @@ and creates each encoder and decoder accordingly.
 import torch
 import torch.nn as nn
 
+from allennlp.modules.elmo import Elmo
+
 import onmt
 import onmt.io
 import onmt.Models
@@ -51,7 +53,7 @@ def make_embeddings(opt, word_dict, feature_dicts, for_encoder=True):
                       feat_vocab_sizes=num_feat_embeddings)
 
 
-def make_encoder(opt, embeddings):
+def make_encoder(opt, embeddings, elmo=None):
     """
     Various encoder dispatcher function.
     Args:
@@ -70,7 +72,7 @@ def make_encoder(opt, embeddings):
     else:
         # "rnn" or "brnn"
         return RNNEncoder(opt.rnn_type, opt.brnn, opt.enc_layers,
-                          opt.rnn_size, opt.dropout, embeddings)
+                          opt.rnn_size, opt.dropout, embeddings, elmo)
 
 
 def make_decoder(opt, embeddings):
@@ -138,7 +140,7 @@ def make_base_model(model_opt, fields, gpu, checkpoint=None):
     Returns:
         the NMTModel.
     """
-    assert model_opt.model_type in ["text", "img", "audio"], \
+    assert model_opt.model_type in ["text", "img", "audio", "text-elmo"], \
         ("Unsupported model type %s" % (model_opt.model_type))
 
     # Make encoder.
@@ -148,6 +150,26 @@ def make_base_model(model_opt, fields, gpu, checkpoint=None):
         src_embeddings = make_embeddings(model_opt, src_dict,
                                          feature_dicts)
         encoder = make_encoder(model_opt, src_embeddings)
+    elif model_opt.model_type == "text-elmo":
+        print ('Using ELMO')
+        src_dict = fields["src"].vocab
+        feature_dicts = onmt.io.collect_feature_vocabs(fields, 'src')
+        src_embeddings = make_embeddings(model_opt, src_dict,
+                                         feature_dicts)
+        options_file = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_options.json"
+        weight_file = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_weights.hdf5"
+
+        # Create the ELMo class.  This example computes two output representation
+        # layers each with separate layer weights.
+        # We recommend adding dropout (50% is good default) either here or elsewhere
+        # where ELMo is used (e.g. in the next layer bi-LSTM).
+        elmo = Elmo(options_file, weight_file, num_output_representations=2,
+                    do_layer_norm=False, dropout=0)
+        
+        if gpu:
+            elmo.cuda()
+
+        encoder = make_encoder(model_opt, src_embeddings, elmo)
     elif model_opt.model_type == "img":
         encoder = ImageEncoder(model_opt.enc_layers,
                                model_opt.brnn,

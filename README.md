@@ -59,7 +59,7 @@ Beta Features (committed):
 ### Step 1: Preprocess the data
 
 ```bash
-python preprocess.py -train_src data/src-train.txt -train_tgt data/tgt-train.txt -valid_src data/src-val.txt -valid_tgt data/tgt-val.txt -save_data data/demo
+python preprocess.py -character_ids -train_src data/src-train.txt -train_tgt data/tgt-train.txt -valid_src data/src-val.txt -valid_tgt data/tgt-val.txt -save_data data/demo
 ```
 
 We will be working with some example data in `data/` folder.
@@ -86,7 +86,7 @@ Internally the system never touches the words themselves, but uses these indices
 ### Step 2: Train the model
 
 ```bash
-python train.py -data data/demo -save_model demo-model
+python train.py -data data/demo -model_type text-elmo -save_model demo-model
 ```
 
 The main train command is quite simple. Minimally it takes a data file

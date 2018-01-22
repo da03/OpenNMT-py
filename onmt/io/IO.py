@@ -39,6 +39,7 @@ def get_fields(data_type, n_src_features, n_tgt_features):
         A dictionary whose keys are strings and whose values are the
         corresponding Field objects.
     """
+    print (data_type)
     if data_type == 'text':
         return TextDataset.get_fields(n_src_features, n_tgt_features)
     elif data_type == 'img':
@@ -55,6 +56,7 @@ def load_fields_from_vocab(vocab, data_type="text"):
     n_src_features = len(collect_features(vocab, 'src'))
     n_tgt_features = len(collect_features(vocab, 'tgt'))
     fields = get_fields(data_type, n_src_features, n_tgt_features)
+    print (vocab)
     for k, v in vocab.items():
         # Hack. Can't pickle defaultdict :(
         v.stoi = defaultdict(lambda: 0, v.stoi)
@@ -135,7 +137,10 @@ def make_features(batch, side, data_type='text'):
     levels = [data] + features
 
     if data_type == 'text':
-        return torch.cat([level.unsqueeze(2) for level in levels], 2)
+        if side=='tgt' or (not hasattr(batch, 'character_ids')):
+            return torch.cat([level.unsqueeze(2) for level in levels], 2)
+        else:
+            return (torch.cat([level.unsqueeze(2) for level in levels], 2), batch.character_ids)
     else:
         return levels[0]
 
@@ -171,7 +176,7 @@ def collect_feature_vocabs(fields, side):
 def build_dataset(fields, data_type, src_path, tgt_path, src_dir=None,
                   src_seq_length=0, tgt_seq_length=0,
                   src_seq_length_trunc=0, tgt_seq_length_trunc=0,
-                  dynamic_dict=True, sample_rate=0,
+                  dynamic_dict=True, character_ids=False, sample_rate=0,
                   window_size=0, window_stride=0, window=None,
                   normalize_audio=True, use_filter_pred=True):
 
@@ -194,6 +199,7 @@ def build_dataset(fields, data_type, src_path, tgt_path, src_dir=None,
                               src_seq_length=src_seq_length,
                               tgt_seq_length=tgt_seq_length,
                               dynamic_dict=dynamic_dict,
+                              character_ids=character_ids,
                               use_filter_pred=use_filter_pred)
 
     elif data_type == 'img':

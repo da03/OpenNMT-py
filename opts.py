@@ -162,6 +162,9 @@ def preprocess_opts(parser):
 
     group.add_argument('-dynamic_dict', action='store_true',
                        help="Create dynamic dictionaries")
+    group.add_argument('-character_ids', action='store_true',
+                       help="""Create character ids. This option must be set
+                       to true in order to use ELMo.""")
     group.add_argument('-share_vocab', action='store_true',
                        help="Share source and target vocabulary")
 
@@ -381,6 +384,8 @@ def translate_opts(parser):
     # Options most relevant to summarization.
     group.add_argument('-dynamic_dict', action='store_true',
                        help="Create dynamic dictionaries")
+    group.add_argument('-character_ids', action='store_true',
+                       help="Create character ids.")
     group.add_argument('-share_vocab', action='store_true',
                        help="Share source and target vocabulary")
 

@@ -34,6 +34,8 @@ class EncoderBase(nn.Module):
           E-->G
     """
     def _check_args(self, input, lengths=None, hidden=None):
+        if type(input) == tuple:
+            input = input[0]
         s_len, n_batch, n_feats = input.size()
         if lengths is not None:
             n_batch_, = lengths.size()
@@ -92,7 +94,7 @@ class RNNEncoder(EncoderBase):
        embeddings (:obj:`onmt.modules.Embeddings`): embedding module to use
     """
     def __init__(self, rnn_type, bidirectional, num_layers,
-                 hidden_size, dropout=0.0, embeddings=None):
+                 hidden_size, dropout=0.0, embeddings=None, elmo=None):
         super(RNNEncoder, self).__init__()
         assert embeddings is not None
 
@@ -101,20 +103,24 @@ class RNNEncoder(EncoderBase):
         hidden_size = hidden_size // num_directions
         self.embeddings = embeddings
         self.no_pack_padded_seq = False
+        self.elmo = elmo
 
+        embedding_size = embeddings.embedding_size
+        if self.elmo:
+            embedding_size += 1024
         # Use pytorch version when available.
         if rnn_type == "SRU":
             # SRU doesn't support PackedSequence.
             self.no_pack_padded_seq = True
             self.rnn = onmt.modules.SRU(
-                    input_size=embeddings.embedding_size,
+                    input_size=embedding_size,
                     hidden_size=hidden_size,
                     num_layers=num_layers,
                     dropout=dropout,
                     bidirectional=bidirectional)
         else:
             self.rnn = getattr(nn, rnn_type)(
-                    input_size=embeddings.embedding_size,
+                    input_size=embedding_size,
                     hidden_size=hidden_size,
                     num_layers=num_layers,
                     dropout=dropout,
@@ -124,8 +130,16 @@ class RNNEncoder(EncoderBase):
         "See :obj:`EncoderBase.forward()`"
         self._check_args(input, lengths, hidden)
 
+        if type(input) == tuple:
+            character_ids = input[1]
+            input = input[0]
+
         emb = self.embeddings(input)
         s_len, batch, emb_dim = emb.size()
+        if self.elmo:
+            representations = self.elmo(character_ids)
+            elmo_representations = representations['elmo_representations'][0].transpose(0,1)
+            emb = torch.cat([emb, elmo_representations], 2)
 
         packed_emb = emb
         if lengths is not None and not self.no_pack_padded_seq:
@@ -190,7 +204,7 @@ class RNNDecoderBase(nn.Module):
     def __init__(self, rnn_type, bidirectional_encoder, num_layers,
                  hidden_size, attn_type="general",
                  coverage_attn=False, context_gate=None,
-                 copy_attn=False, dropout=0.0, embeddings=None):
+                 copy_attn=False, dropout=0.0, embeddings=None, elmo=None):
         super(RNNDecoderBase, self).__init__()
 
         # Basic attributes.
@@ -200,6 +214,7 @@ class RNNDecoderBase(nn.Module):
         self.hidden_size = hidden_size
         self.embeddings = embeddings
         self.dropout = nn.Dropout(dropout)
+        self.elmo = elmo
 
         # Build the RNN.
         self.rnn = self._build_rnn(rnn_type, self._input_size, hidden_size,
@@ -249,6 +264,15 @@ class RNNDecoderBase(nn.Module):
         """
         # Args Check
         assert isinstance(state, RNNDecoderState)
+        if type(input) == tuple:
+            emb = self.embeddings(input[0])
+            if self.elmo:
+                representations = elmo(input[1])
+                elmo_representations = representations['elmo_representations'][0]
+                print (elmo_representations)
+                print('forwarded')
+                sys.exit()
+            input = input[0]
         input_len, input_batch, _ = input.size()
         contxt_len, contxt_batch, _ = context.size()
         aeq(input_batch, contxt_batch)

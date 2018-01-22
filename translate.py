@@ -72,6 +72,7 @@ def main():
                                  window_size=opt.window_size,
                                  window_stride=opt.window_stride,
                                  window=opt.window,
+                                 character_ids=opt.character_ids,
                                  use_filter_pred=False)
 
     # Sort batch by decreasing lengths of sentence required by pytorch.
