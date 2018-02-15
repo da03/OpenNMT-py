@@ -10,9 +10,13 @@ def model_opts(parser):
     # Model options
     parser.add_argument('-model_type', default='text',
                         help="Type of encoder to use. Options are [text|img].")
+    parser.add_argument('-feat_id', type=int, default=0,
+                        help='Word embedding for both.')
     # Embedding Options
     parser.add_argument('-word_vec_size', type=int, default=-1,
                         help='Word embedding for both.')
+    parser.add_argument('-phase', type=int, default=1,
+            help='1: joint, 2: classifier only.')
     parser.add_argument('-src_word_vec_size', type=int, default=500,
                         help='Src word embedding sizes')
     parser.add_argument('-tgt_word_vec_size', type=int, default=500,
@@ -45,6 +49,10 @@ def model_opts(parser):
                         choices=['rnn', 'transformer', 'cnn'],
                         help='Type of decoder layer to use.')
 
+    parser.add_argument('-classify_layer', type=int, default=0,
+            help='which layer, 0: embedding')
+    parser.add_argument('-num_classifiers', type=int, default=5,
+                        help='Number of layers in enc/dec.')
     parser.add_argument('-layers', type=int, default=-1,
                         help='Number of layers in enc/dec.')
     parser.add_argument('-enc_layers', type=int, default=2,
@@ -151,6 +159,8 @@ def train_opts(parser):
                         reproducibility.""")
 
     # Init options
+    parser.add_argument('-lamb', type=float, default=1,
+                        help='The epoch from which to start')
     parser.add_argument('-start_epoch', type=int, default=1,
                         help='The epoch from which to start')
     parser.add_argument('-param_init', type=float, default=0.1,
@@ -225,6 +235,8 @@ def train_opts(parser):
 
 
 def translate_opts(parser):
+    parser.add_argument('-feat_id', type=int, default=0,
+                        help='Word embedding for both.')
     parser.add_argument('-model', required=True,
                         help='Path to model .pt file')
     parser.add_argument('-src',   required=True,

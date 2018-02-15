@@ -63,18 +63,19 @@ class Embeddings(nn.Module):
         emb_dims = [word_vec_size]
         pad_indices = [word_padding_idx]
 
-        # Dimensions and padding for feature embedding matrices
-        # (these have no effect if feat_vocab_sizes is empty)
-        if feat_merge == 'sum':
-            feat_dims = [word_vec_size] * len(feat_vocab_sizes)
-        elif feat_vec_size > 0:
-            feat_dims = [feat_vec_size] * len(feat_vocab_sizes)
-        else:
-            feat_dims = [int(vocab ** feat_vec_exponent)
-                         for vocab in feat_vocab_sizes]
-        vocab_sizes.extend(feat_vocab_sizes)
-        emb_dims.extend(feat_dims)
-        pad_indices.extend(feat_padding_idx)
+        ## Dimensions and padding for feature embedding matrices
+        ## (these have no effect if feat_vocab_sizes is empty)
+        #if feat_merge == 'sum':
+        #    feat_dims = [word_vec_size] * len(feat_vocab_sizes)
+        #elif feat_vec_size > 0:
+        #    feat_dims = [feat_vec_size] * len(feat_vocab_sizes)
+        #else:
+        #    feat_dims = [int(vocab ** feat_vec_exponent)
+        #                 for vocab in feat_vocab_sizes]
+        #vocab_sizes.extend(feat_vocab_sizes)
+        print ('WARNING: features ignored')
+        #emb_dims.extend(feat_dims)
+        #pad_indices.extend(feat_padding_idx)
 
         # The embedding matrix look-up tables. The first look-up table
         # is for words. Subsequent ones are for features, if any exist.
@@ -132,6 +133,7 @@ class Embeddings(nn.Module):
         Return:
             emb (FloatTensor): len x batch x self.embedding_size
         """
+        input = input[:,:,0:1]
         in_length, in_batch, nfeat = input.size()
         aeq(nfeat, len(self.emb_luts))
 

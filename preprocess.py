@@ -57,6 +57,7 @@ def main():
     with codecs.open(opt.train_src, "r", "utf-8") as src_file:
         src_line = src_file.readline().strip().split()
         _, _, n_src_features = onmt.IO.extract_features(src_line)
+    print (n_src_features)
     with codecs.open(opt.train_tgt, "r", "utf-8") as tgt_file:
         tgt_line = tgt_file.readline().strip().split()
         _, _, n_tgt_features = onmt.IO.extract_features(tgt_line)

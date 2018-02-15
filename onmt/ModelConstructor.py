@@ -48,7 +48,7 @@ def make_embeddings(opt, word_dict, feature_dicts, for_encoder=True):
                       num_feat_embeddings)
 
 
-def make_encoder(opt, embeddings):
+def make_encoder(opt, embeddings, num_feat_embeddings, feature_dicts, feat_id):
     """
     Various encoder dispatcher function.
     Args:
@@ -66,8 +66,13 @@ def make_encoder(opt, embeddings):
         return MeanEncoder(opt.enc_layers, embeddings)
     else:
         # "rnn" or "brnn"
+        if not 'num_classifiers' in opt:
+            opt.num_classifiers = 1
+        if not 'classify_layer' in opt:
+            opt.classify_layer = 0
         return RNNEncoder(opt.rnn_type, opt.brnn, opt.enc_layers,
-                          opt.rnn_size, opt.dropout, embeddings)
+                          opt.rnn_size, opt.dropout, embeddings,
+                          num_feat_embeddings, feature_dicts, feat_id, opt.num_classifiers, opt.phase, opt.classify_layer)
 
 
 def make_decoder(opt, embeddings):
@@ -106,7 +111,7 @@ def make_decoder(opt, embeddings):
                              embeddings)
 
 
-def make_base_model(model_opt, fields, gpu, checkpoint=None):
+def make_base_model(model_opt, fields, gpu, checkpoint=None, opt={}):
     """
     Args:
         model_opt: the option loaded from checkpoint.
@@ -126,7 +131,9 @@ def make_base_model(model_opt, fields, gpu, checkpoint=None):
         feature_dicts = onmt.IO.collect_feature_dicts(fields, 'src')
         src_embeddings = make_embeddings(model_opt, src_dict,
                                          feature_dicts)
-        encoder = make_encoder(model_opt, src_embeddings)
+        num_feat_embeddings = [len(feat_dict) for feat_dict in
+                               feature_dicts]
+        encoder = make_encoder(model_opt, src_embeddings, num_feat_embeddings, feature_dicts, opt.feat_id)
     else:
         encoder = ImageEncoder(model_opt.layers,
                                model_opt.brnn,
@@ -162,8 +169,21 @@ def make_base_model(model_opt, fields, gpu, checkpoint=None):
 
     # Load the model states from checkpoint or initialize them.
     if checkpoint is not None:
+        for p in model.parameters():
+            p.data.uniform_(-model_opt.param_init, model_opt.param_init)
+        for p in generator.parameters():
+            p.data.uniform_(-model_opt.param_init, model_opt.param_init)
         print('Loading model parameters.')
-        model.load_state_dict(checkpoint['model'])
+        pretrained_dict = checkpoint['model']
+        model_dict = model.state_dict()
+        # 1. filter out unnecessary keys
+        print('ignoring classifier')
+        pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict and 'classifier' not in k}
+        # 2. overwrite entries in the existing state dict
+        model_dict.update(pretrained_dict) 
+        # 3. load the new state dict
+        model.load_state_dict(model_dict)
+        #model.load_state_dict(checkpoint['model'])
         generator.load_state_dict(checkpoint['generator'])
     else:
         if model_opt.param_init != 0.0:

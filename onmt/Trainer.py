@@ -23,34 +23,43 @@ class Statistics(object):
     """
     Train/validate loss statistics.
     """
-    def __init__(self, loss=0, n_words=0, n_correct=0):
+    def __init__(self, loss=0, n_words=0, n_correct=0, loss2=0, n_words2=0, n_correct2=0):
         self.loss = loss
         self.n_words = n_words
         self.n_correct = n_correct
         self.n_src_words = 0
+        self.loss2 = loss2
+        self.n_words2 = n_words2
+        self.n_correct2 = n_correct2
+        self.n_src_words2 = 0
         self.start_time = time.time()
 
     def update(self, stat):
         self.loss += stat.loss
         self.n_words += stat.n_words
         self.n_correct += stat.n_correct
+        self.loss2 += stat.loss2
+        self.n_words2 += stat.n_words2
+        self.n_correct2 += stat.n_correct2
 
     def accuracy(self):
-        return 100 * (self.n_correct / self.n_words)
+        return (100 * (self.n_correct / self.n_words), 100*(self.n_correct2/self.n_words2))
 
     def ppl(self):
-        return math.exp(min(self.loss / self.n_words, 100))
+        return (math.exp(min(self.loss / self.n_words, 100)), math.exp(min(self.loss2/self.n_words2, 100)))
 
     def elapsed_time(self):
         return time.time() - self.start_time
 
     def output(self, epoch, batch, n_batches, start):
         t = self.elapsed_time()
-        print(("Epoch %2d, %5d/%5d; acc: %6.2f; ppl: %6.2f; " +
+        print(("Epoch %2d, %5d/%5d; acc: %6.2f; ppl: %6.2f; pos acc: %6.2f; pos ppl: %6.2f; " +
                "%3.0f src tok/s; %3.0f tgt tok/s; %6.0f s elapsed") %
               (epoch, batch,  n_batches,
-               self.accuracy(),
-               self.ppl(),
+               self.accuracy()[0],
+               self.ppl()[0],
+               self.accuracy()[1],
+               self.ppl()[1],
                self.n_src_words / (t + 1e-5),
                self.n_words / (t + 1e-5),
                time.time() - start))
@@ -58,16 +67,18 @@ class Statistics(object):
 
     def log(self, prefix, experiment, lr):
         t = self.elapsed_time()
-        experiment.add_scalar_value(prefix + "_ppl", self.ppl())
-        experiment.add_scalar_value(prefix + "_accuracy", self.accuracy())
+        experiment.add_scalar_value(prefix + "_ppl0", self.ppl()[0])
+        experiment.add_scalar_value(prefix + "_accuracy0", self.accuracy()[0])
+        experiment.add_scalar_value(prefix + "_ppl1", self.ppl()[1])
+        experiment.add_scalar_value(prefix + "_accuracy1", self.accuracy()[1])
         experiment.add_scalar_value(prefix + "_tgtper",  self.n_words / t)
         experiment.add_scalar_value(prefix + "_lr", lr)
 
 
 class Trainer(object):
     def __init__(self, model, train_iter, valid_iter,
-                 train_loss, valid_loss, optim,
-                 trunc_size, shard_size):
+                 train_loss, valid_loss, optim, optim_classifier,
+                 trunc_size, shard_size, lamb, feat_id):
         """
         Args:
             model: the seq2seq model.
@@ -86,13 +97,22 @@ class Trainer(object):
         self.train_loss = train_loss
         self.valid_loss = valid_loss
         self.optim = optim
+        self.optim_classifier = optim_classifier
         self.trunc_size = trunc_size
         self.shard_size = shard_size
+        self.lamb = lamb
+        self.feat_id = feat_id
+        print ('-----')
+        print (lamb)
 
         # Set model in training mode.
         self.model.train()
+        #self.model.eval()
+        #self.model.encoder.classifier.train()
 
     def train(self, epoch, report_func=None):
+        #self.model.eval()
+        #self.model.encoder.classifier.train()
         """ Called for each epoch to train. """
         total_stats = Statistics()
         report_stats = Statistics()
@@ -115,16 +135,18 @@ class Trainer(object):
 
                 # 2. F-prop all but generator.
                 self.model.zero_grad()
-                outputs, attns, dec_state = \
+                outputs, attns, dec_state, labels, labels_free, labels_add = \
                     self.model(src, tgt, src_lengths, dec_state)
+
 
                 # 3. Compute loss in shards for memory efficiency.
                 batch_stats = self.train_loss.sharded_compute_loss(
                         batch, outputs, attns, j,
-                        trunc_size, self.shard_size)
+                        trunc_size, self.shard_size, labels, labels_free, src[:,:,1+self.feat_id], self.lamb, labels_add)
 
                 # 4. Update the parameters and statistics.
                 self.optim.step()
+                self.optim_classifier.step()
                 total_stats.update(batch_stats)
                 report_stats.update(batch_stats)
 
@@ -152,11 +174,11 @@ class Trainer(object):
             tgt = onmt.IO.make_features(batch, 'tgt')
 
             # F-prop through the model.
-            outputs, attns, _ = self.model(src, tgt, src_lengths)
+            outputs, attns, _, labels, labels_free, labels_add = self.model(src, tgt, src_lengths)
 
             # Compute loss.
             batch_stats = self.valid_loss.monolithic_compute_loss(
-                    batch, outputs, attns)
+                    batch, outputs, attns, labels, labels_free, src[:,:,1+self.feat_id], labels_add)
 
             # Update statistics.
             stats.update(batch_stats)
@@ -168,7 +190,8 @@ class Trainer(object):
 
     def epoch_step(self, ppl, epoch):
         """ Called for each epoch to update learning rate. """
-        return self.optim.updateLearningRate(ppl, epoch)
+        self.optim.updateLearningRate(ppl, epoch)
+        self.optim_classifier.updateLearningRate(ppl, epoch)
 
     def drop_checkpoint(self, opt, epoch, fields, valid_stats):
         """ Called conditionally each epoch to save a snapshot. """
@@ -189,9 +212,10 @@ class Trainer(object):
             'vocab': onmt.IO.save_vocab(fields),
             'opt': opt,
             'epoch': epoch,
-            'optim': self.optim
+            'optim': self.optim,
+            'optim_classifier': self.optim_classifier
         }
         torch.save(checkpoint,
-                   '%s_acc_%.2f_ppl_%.2f_e%d.pt'
-                   % (opt.save_model, valid_stats.accuracy(),
-                      valid_stats.ppl(), epoch))
+                   '%s_acc_%.2f_%.2f_ppl_%.2f_%.2f_e%d.pt'
+                   % (opt.save_model, valid_stats.accuracy()[0], valid_stats.accuracy()[1],
+                      valid_stats.ppl()[0], valid_stats.ppl()[1], epoch))

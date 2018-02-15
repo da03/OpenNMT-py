@@ -121,8 +121,8 @@ def make_features(batch, side):
     else:
         data = batch.__dict__[side]
     feat_start = side + "_feat_"
-    features = sorted(batch.__dict__[k]
-                      for k in batch.__dict__ if feat_start in k)
+    keys = sorted([k for k in batch.__dict__ if feat_start in k])
+    features = [batch.__dict__[k] for k in keys]
     levels = [data] + features
     return torch.cat([level.unsqueeze(2) for level in levels], 2)
 
@@ -175,7 +175,7 @@ def get_fields(n_src_features, n_tgt_features):
             torchtext.data.Field(init_token=BOS_WORD, eos_token=EOS_WORD,
                                  pad_token=PAD_WORD)
 
-    def make_src(data, _):
+    def make_src(data, _, q=None):
         src_size = max([t.size(0) for t in data])
         src_vocab_size = max([t.max() for t in data]) + 1
         alignment = torch.zeros(src_size, len(data), src_vocab_size)
@@ -275,7 +275,7 @@ class ONMTDataset(torchtext.data.Dataset):
     @staticmethod
     def sort_key(ex):
         "Sort in reverse size order"
-        return -len(ex.src)
+        return len(ex.src)
 
     def __init__(self, src_path, tgt_path, fields,
                  src_seq_length=0, tgt_seq_length=0,

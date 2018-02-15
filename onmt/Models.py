@@ -53,14 +53,32 @@ class MeanEncoder(EncoderBase):
 class RNNEncoder(EncoderBase):
     """ The standard RNN encoder. """
     def __init__(self, rnn_type, bidirectional, num_layers,
-                 hidden_size, dropout, embeddings):
+                 hidden_size, dropout, embeddings, num_feat_embeddings, feature_dicts, feat_id, num_classifiers, phase, classify_layer):
         super(RNNEncoder, self).__init__()
+        self.feature_dicts = feature_dicts
+        self.num_layers = num_layers
+        self.classify_layer = classify_layer
+        print ('inspecting %dth layer'%classify_layer)
 
         num_directions = 2 if bidirectional else 1
         assert hidden_size % num_directions == 0
         hidden_size = hidden_size // num_directions
         self.embeddings = embeddings
         self.no_pack_padded_seq = False
+
+        print ('feature id: %d'%feat_id)
+        #print (num_feat_embeddings)
+        vocab_size = num_feat_embeddings[feat_id]
+        #print (vocab_size)
+        #self.classifier = nn.Sequential(nn.Linear(500, 500), nn.Dropout(p=0.5), nn.ReLU(), nn.Linear(500, vocab_size))
+        self.classifier = nn.Sequential(nn.Linear(500, 500), nn.ReLU(), nn.Linear(500, vocab_size))
+        if phase == 2:
+            num_classifiers = 1
+        self.num_classifiers = num_classifiers
+        if num_classifiers > 1:
+            for i in range(num_classifiers-1):
+                setattr(self, 'classifier%d'%i, nn.Sequential(nn.Linear(500,500), nn.ReLU(), nn.Linear(500, vocab_size)))
+        self.feature_dict = self.feature_dicts[feat_id]
 
         # Use pytorch version when available.
         if rnn_type == "SRU":
@@ -69,22 +87,56 @@ class RNNEncoder(EncoderBase):
             self.rnn = onmt.modules.SRU(
                     input_size=embeddings.embedding_size,
                     hidden_size=hidden_size,
-                    num_layers=num_layers,
+                    num_layers=1,
                     dropout=dropout,
                     bidirectional=bidirectional)
         else:
             self.rnn = getattr(nn, rnn_type)(
                     input_size=embeddings.embedding_size,
                     hidden_size=hidden_size,
-                    num_layers=num_layers,
+                    num_layers=1,
                     dropout=dropout,
                     bidirectional=bidirectional)
+            if num_layers > 1:
+                for i in range(num_layers-1):
+                    setattr(self, 'rnn%d'%i, getattr(nn, rnn_type)(
+                        input_size=embeddings.embedding_size,
+                        hidden_size=hidden_size,
+                        num_layers=1,
+                        dropout=dropout,
+                        bidirectional=bidirectional))
 
     def forward(self, input, lengths=None, hidden=None):
         """ See EncoderBase.forward() for description of args and returns."""
         self._check_args(input, lengths, hidden)
-
+        assert (hidden==None)
         emb = self.embeddings(input)
+        #print ('input size')
+        #print (input.size())
+        #print ('embedding size')
+        #print (emb.size())
+        # Warning: block gradient flow 
+        emb_clone = torch.autograd.Variable(emb.data.clone(), requires_grad=False)
+        if self.classify_layer == 0:
+            labels = self.classifier(emb_clone)
+            labels_free = self.classifier(emb)
+
+            labels_add = []
+            if self.num_classifiers > 1:
+                for i in range(self.num_classifiers-1):
+                    c = getattr(self, 'classifier%d'%i)
+                    labels_add_notfree = c(emb_clone)
+                    labels_add_free = c(emb)
+                    labels_add.append((labels_add_notfree, labels_add_free))
+        #print ('labels')
+        #print (labels.size())
+        #features = input[:, :, 1]
+        #print ('features')
+        #print (features.size())
+        #feat = features[:,0].data.cpu().numpy()
+        #print (feat)
+        #for f in feat:
+        #    print (self.feature_dict.itos[f])
         s_len, batch, emb_dim = emb.size()
 
         packed_emb = emb
@@ -93,12 +145,45 @@ class RNNEncoder(EncoderBase):
             lengths = lengths.view(-1).tolist()
             packed_emb = pack(emb, lengths)
 
-        outputs, hidden_t = self.rnn(packed_emb, hidden)
+        outputs = packed_emb
+        hidden_ts = []
+        for l in range(self.num_layers):
+            if l == 0:
+                rnn = self.rnn
+            else:
+                rnn = getattr(self, 'rnn%d'%(l-1))
+            outputs, hidden_t = self.rnn(outputs, hidden)
+            hidden_ts.append(hidden_t)
+            if lengths is not None and not self.no_pack_padded_seq:
+                outputs = unpack(outputs)[0]
 
+            if l+1 == self.classify_layer:
+                labels = self.classifier(emb_clone)
+                labels_free = self.classifier(emb)
+
+                labels_add = []
+                if self.num_classifiers > 1:
+                    for i in range(self.num_classifiers-1):
+                        c = getattr(self, 'classifier%d'%i)
+                        labels_add_notfree = c(emb_clone)
+                        labels_add_free = c(emb)
+                        labels_add.append((labels_add_notfree, labels_add_free))
+            if lengths is not None and not self.no_pack_padded_seq:
+                # Lengths data is wrapped inside a Variable.
+                packed_outputs = pack(outputs, lengths)
+                outputs = packed_outputs
         if lengths is not None and not self.no_pack_padded_seq:
             outputs = unpack(outputs)[0]
 
-        return hidden_t, outputs
+        hiddens = []
+        for n in range(len(hidden_ts[0])):
+            hs = []
+            for l in range(self.num_layers):
+                hs.append(hidden_ts[l][n])
+            hiddens.append(torch.cat(hs, 0))
+        hidden_t = tuple(hiddens)
+
+        return hidden_t, outputs, labels, labels_free, labels_add
 
 
 class RNNDecoderBase(nn.Module):
@@ -417,7 +502,8 @@ class NMTModel(nn.Module):
         """
         src = src
         tgt = tgt[:-1]  # exclude last target from inputs
-        enc_hidden, context = self.encoder(src, lengths)
+        enc_hidden, context, labels, labels_free, labels_add_free = self.encoder(src, lengths)
+
         enc_state = self.decoder.init_decoder_state(src, context, enc_hidden)
         out, dec_state, attns = self.decoder(tgt, context,
                                              enc_state if dec_state is None
@@ -426,7 +512,7 @@ class NMTModel(nn.Module):
             # Not yet supported on multi-gpu
             dec_state = None
             attns = None
-        return out, attns, dec_state
+        return out, attns, dec_state, labels, labels_free, labels_add_free
 
 
 class DecoderState(object):

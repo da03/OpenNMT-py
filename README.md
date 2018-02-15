@@ -1,185 +1,79 @@
-# OpenNMT-py: Open-Source Neural Machine Translation
+# OpenNMT-py adapted for Single Task Neural Machine Translation
 
-This is a [Pytorch](https://github.com/pytorch/pytorch)
-port of [OpenNMT](https://github.com/OpenNMT/OpenNMT),
-an open-source (MIT) neural machine translation system. It is designed to be research friendly to try out new ideas in translation, summary, image-to-text, morphology, and many other domains.
+## Usage:
 
+### Preprocess data with source side features
 
-OpenNMT-py is run as a collaborative open-source project. It is currently maintained by [Sasha Rush](http://github.com/srush) (Cambridge, MA), [Ben Peters](http://github.com/bpopeters) (Saarbrücken), and [Jianyu Zhan](http://github.com/jianyuzhan) (Shenzhen). The original code was written by [Adam Lerer](http://github.com/adamlerer) (NYC). Codebase is nearing a stable 0.1 version. We currently recommend forking if you want stable code.
-
-We love contributions. Please consult the Issues page for any [Contributions Welcome](https://github.com/OpenNMT/OpenNMT-py/issues?q=is%3Aissue+is%3Aopen+label%3A%22contributions+welcome%22) tagged post. 
-
-<center style="padding: 40px"><img width="70%" src="http://opennmt.github.io/simple-attn.png" /></center>
-
-
-Table of Contents
-=================
-
-  * [Requirements](#requirements)
-  * [Features](#features)
-  * [Quickstart](#quickstart)
-  * [Advanced](#advanced)
-  * [Citation](#citation)
- 
-## Requirements
-
-```bash
-pip install -r requirements.txt
-```
-
-
-## Features
-
-The following OpenNMT features are implemented:
-
-- multi-layer bidirectional RNNs with attention and dropout
-- data preprocessing
-- saving and loading from checkpoints
-- Inference (translation) with batching and beam search
-- Context gate
-- Multiple source and target RNN (lstm/gru) types and attention (dotprod/mlp) types
-- TensorBoard/Crayon logging
-- Source word features
-
-Beta Features (committed):
-- multi-GPU
-- Image-to-text processing
-- "Attention is all you need"
-- Copy, coverage
-- Structured attention
-- Conv2Conv convolution model
-- SRU "RNNs faster than CNN" paper
-- Inference time loss functions.
-
-## Quickstart
-
-## Step 1: Preprocess the data
-
-```bash
-python preprocess.py -train_src data/src-train.txt -train_tgt data/tgt-train.txt -valid_src data/src-val.txt -valid_tgt data/tgt-val.txt -save_data data/demo
-```
-
-We will be working with some example data in `data/` folder.
-
-The data consists of parallel source (`src`) and target (`tgt`) data containing one sentence per line with tokens separated by a space:
-
-* `src-train.txt`
-* `tgt-train.txt`
-* `src-val.txt`
-* `tgt-val.txt`
-
-Validation files are required and used to evaluate the convergence of the training. It usually contains no more than 5000 sentences.
-
-
-After running the preprocessing, the following files are generated:
-
-* `demo.src.dict`: Dictionary of source vocab to index mappings.
-* `demo.tgt.dict`: Dictionary of target vocab to index mappings.
-* `demo.train.pt`: serialized PyTorch file containing vocabulary, training and validation data
-
-
-Internally the system never touches the words themselves, but uses these indices.
-
-## Step 2: Train the model
-
-```bash
-python train.py -data data/demo -save_model demo-model
-```
-
-The main train command is quite simple. Minimally it takes a data file
-and a save file.  This will run the default model, which consists of a
-2-layer LSTM with 500 hidden units on both the encoder/decoder. You
-can also add `-gpuid 1` to use (say) GPU 1.
-
-## Step 3: Translate
-
-```bash
-python translate.py -model demo-model_epochX_PPL.pt -src data/src-test.txt -output pred.txt -replace_unk -verbose
-```
-
-Now you have a model which you can use to predict on new data. We do this by running beam search. This will output predictions into `pred.txt`.
-
-!!! note "Note"
-    The predictions are going to be quite terrible, as the demo dataset is small. Try running on some larger datasets! For example you can download millions of parallel sentences for [translation](http://www.statmt.org/wmt16/translation-task.html) or [summarization](https://github.com/harvardnlp/sent-summary).
-
-## Some useful tools:
-
-
-## Full Translation Example
-
-The example below uses the Moses tokenizer (http://www.statmt.org/moses/) to prepare the data and the moses BLEU script for evaluation.
-
-```bash
-wget https://raw.githubusercontent.com/moses-smt/mosesdecoder/master/scripts/tokenizer/tokenizer.perl
-wget https://raw.githubusercontent.com/moses-smt/mosesdecoder/master/scripts/share/nonbreaking_prefixes/nonbreaking_prefix.de
-wget https://raw.githubusercontent.com/moses-smt/mosesdecoder/master/scripts/share/nonbreaking_prefixes/nonbreaking_prefix.en
-sed -i "s/$RealBin\/..\/share\/nonbreaking_prefixes//" tokenizer.perl
-wget https://raw.githubusercontent.com/moses-smt/mosesdecoder/master/scripts/generic/multi-bleu.perl
-```
-
-## WMT'16 Multimodal Translation: Multi30k (de-en)
-
-An example of training for the WMT'16 Multimodal Translation task (http://www.statmt.org/wmt16/multimodal-task.html).
-
-### 0) Download the data.
-
-```bash
-mkdir -p data/multi30k
-wget http://www.quest.dcs.shef.ac.uk/wmt16_files_mmt/training.tar.gz &&  tar -xf training.tar.gz -C data/multi30k && rm training.tar.gz
-wget http://www.quest.dcs.shef.ac.uk/wmt16_files_mmt/validation.tar.gz && tar -xf validation.tar.gz -C data/multi30k && rm validation.tar.gz
-wget http://www.quest.dcs.shef.ac.uk/wmt17_files_mmt/mmt_task1_test2016.tar.gz && tar -xf mmt_task1_test2016.tar.gz -C data/multi30k && rm mmt_task1_test2016.tar.gz
-```
-
-### 1) Preprocess the data.
-
-```bash
-# Delete the last line of val and training files.
-for l in en de; do for f in data/multi30k/*.$l; do if [[ "$f" != *"test"* ]]; then sed -i "$ d" $f; fi;  done; done
-for l in en de; do for f in data/multi30k/*.$l; do perl tokenizer.perl -a -no-escape -l $l -q  < $f > $f.atok; done; done
-python preprocess.py -train_src data/multi30k/train.en.atok -train_tgt data/multi30k/train.de.atok -valid_src data/multi30k/val.en.atok -valid_tgt data/multi30k/val.de.atok -save_data data/multi30k.atok.low -lower
-```
-
-### 2) Train the model.
-
-```bash
-python train.py -data data/multi30k.atok.low -save_model multi30k_model -gpuid 0
-```
-
-### 3) Translate sentences.
-
-```bash
-python translate.py -gpu 0 -model multi30k_model_*_e13.pt -src data/multi30k/test.en.atok -tgt data/multi30k/test.de.atok -replace_unk -verbose -output multi30k.test.pred.atok
-```
-
-### 4) Evaluate.
-
-```bash
-perl tools/multi-bleu.perl data/multi30k/test.de.atok < multi30k.test.pred.atok
-```
-
-## Pretrained Models
-
-The following pretrained models can be downloaded and used with translate.py (These were trained with an older version of the code; they will be updated soon).
-
-- [onmt_model_en_de_200k](https://drive.google.com/file/d/0B6N7tANPyVeBWE9WazRYaUd2QTg/view?usp=sharing): An English-German translation model based on the 200k sentence dataset at [OpenNMT/IntegrationTesting](https://github.com/OpenNMT/IntegrationTesting/tree/master/data). Perplexity: 20.
-- onmt_model_en_fr_b1M (coming soon): An English-French model trained on benchmark-1M. Perplexity: 4.85.
-
-
-## Citation
-
-[OpenNMT technical report](https://doi.org/10.18653/v1/P17-4012)
+1. The target file is the same, one tokenized sentence per line. The source file should provide the tags (POS, Morphology) with the following format:
 
 ```
-@inproceedings{opennmt,
-  author    = {Guillaume Klein and
-               Yoon Kim and
-               Yuntian Deng and
-               Jean Senellart and
-               Alexander M. Rush},
-  title     = {OpenNMT: Open-Source Toolkit for Neural Machine Translation},
-  booktitle = {Proc. ACL},
-  year      = {2017},
-  url       = {https://doi.org/10.18653/v1/P17-4012},
-  doi       = {10.18653/v1/P17-4012}
-}
+word1￨pos1￨morphology1 word2￨pos2￨morphology2 word3￨pos3￨morphology3 ...
 ```
+
+Below is a real snippet taken from source validation data:
+
+```
+هل￨RP￨INTERROG_PART تعرفون￨VBP￨IV2MP+IV+IVSUFF_SUBJ:MP_MOOD:I أن￨IN￨SUB_CONJ أحد￨CD￨NOUN_NUM+CASE_DEF_ACC المتع￨DT+NN￨DET+NOUN+CASE_DEF_GEN الكبيرة￨DT+JJ￨DET+ADJ+NSUFF_FEM_SG+CASE_DEF_GEN للسفر￨DT+NN￨PREP+DET+NOUN+CASE_DEF_GEN وأحد￨CD￨NOUN_NUM+CASE_INDEF_GEN مباهج￨NN￨NOUN+CASE_INDEF_GEN أبحاث￨NN￨NOUN+CASE_INDEF_GEN الإثنوجرافيا￨DT+NN￨DET+NOUN في￨IN￨PREP فرصة￨NN￨NOUN+NSUFF_FEM_SG+CASE_DEF_NOM العيش￨DT+NN￨DET+NOUN+CASE_DEF_GEN بين￨NN￨NOUN+CASE_DEF_ACC أولئك￨NN￨NOUN الذين￨WP￨REL_PRON لم￨RP￨NEG_PART ينسوا￨VBP￨IV3MP+IV+IVSUFF_SUBJ:MP_MOOD:SJ الأساليب￨DT+NN￨DET+NOUN+CASE_DEF_ACC القديمة￨DT+JJ￨DET+ADJ+NSUFF_FEM_SG+CASE_DEF_GEN الذين￨WP￨REL_PRON لا￨RP￨NEG_PART زالوا￨VBD￨PV+PVSUFF_SUBJ:3MP يشعرون￨VBP￨IV3MP+IV+IVSUFF_SUBJ:MP_MOOD:I بماضيهم￨JJ￨PREP+ADJ+NSUFF_MASC_PL_ACC+POSS_PRON_3MP في￨IN￨PREP الرياح￨DT+NN￨DET+NOUN+CASE_DEF_GEN ويلمسونه￨VBP￨CONJ+IV3MP+IV+IVSUFF_SUBJ:MP_MOOD:I+IVSUFF_DO:3MS في￨IN￨PREP الأحجار￨DT+NN￨DET+NOUN+CASE_DEF_GEN التي￨WP￨REL_PRON صقلتها￨VBD￨PV+PVSUFF_SUBJ:3FS+PVSUFF_DO:3FS الأمطار￨DT+NN￨DET+NOUN+CASE_DEF_NOM ويتذوقونه￨VBP￨CONJ+IV3MP+IV+IVSUFF_SUBJ:MP_MOOD:I+IVSUFF_DO:3MS في￨IN￨PREP أوراق￨NN￨NOUN+CASE_DEF_GEN النباتات￨DT+NNS￨DET+NOUN+NSUFF_FEM_PL+CASE_DEF_GEN المرة￨DT+NN￨DET+NOUN+NSUFF_FEM_SG+CASE_DEF_GEN
+```
+
+2. Generate data for OpenNMT by
+
+```
+python preprocess.py -train_src ar-en/src-train-features.txt -train_tgt ar-en/tgt-train.txt -valid_src ar-en/src-val-features.txt -valid_tgt ar-en/tgt-val.txt -save_data ar-en/data-feature
+```
+
+### Train with joint objective: machine translation + fooling discriminator
+
+At this stage, for each batch, we optimize the following two objectives:
+
+```
+loss1 = losstranslation - lossdiscriminator * lamb
+```
+
+For `loss1`, we are training our model (w/o training discriminator) such that we can both get good translation and fool the discriminator.
+
+```
+loss2 = lossdiscriminator
+```
+
+For `loss2`, we are training our discriminator (other parts are untouched) such that it can classify the tag based on embeddings or intermediate layer outputs.
+
+
+Our training command looks like below:
+
+```
+python train.py -data ar-en/data-feature -save_model ar-en/model -phase 1 -classify_layer 2 -num_classifiers 5 -feat_id 0 -lamb 0.01 -gpuid 0
+```
+
+There are several important options:
+
+* phase: should be set to 1 for this joint objective
+* classify_layer: the layer that we want to classify, layer 0 is word embedding, layer 1 is the first layer output of encoder rnn
+* num_classifiers: how many classifiers to use for this phase, note that we use multiple classifiers to enable training out tag information better, but wheter this is useful is yet to be examined
+* feat_id: the tag that we use. Note that for source file with features separated by ￨, the first tag after word is indexed 0, and the second is indexed as 1. For our example, 0 corresponds to POS, 1 corresponds to Morphology.
+* lamb: the tradeoff between translation loss and discriminator loss.
+* train_from: optional, use it only if we want to use a pretrained model.
+
+
+### Fix the translation parts of the model, train a new discriminator
+
+We then fix the translation parts and train a new discriminator to see how good information has been trained out.
+
+```
+python train.py -data ar-en/data-feature -save_model ar-en/model -phase 2 -classify_layer 2 -feat_id 0 -gpuid 0
+```
+
+* phase: should be set to 2 for this joint objective
+
+### Translate to target and classify source tags
+
+Then hand-pick a model, run the below translation command, it will produce both target and source tags (source tags are of the same format as source file with features mentioned above).
+
+```
+python translate.py -src ar-en/src-val-features.txt -model ar-en/model-phase2_acc_56.66_93.32_ppl_10.97_1.21_e11.pt -output ar-en/pred.txt -verbose
+```
+
+### Evaluation:
+
+* `tools/multi-bleu.perl` provides BLEU evaluation.
+* `tools/extract_embeddings.py` can convert extract word embeddings.

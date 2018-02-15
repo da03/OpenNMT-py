@@ -26,7 +26,7 @@ class Translator(object):
         self.copy_attn = model_opt.copy_attn
 
         self.model = onmt.ModelConstructor.make_base_model(
-                            model_opt, self.fields, use_gpu(opt), checkpoint)
+                            model_opt, self.fields, use_gpu(opt), checkpoint, opt)
         self.model.eval()
         self.model.generator.eval()
 
@@ -59,6 +59,17 @@ class Translator(object):
                     tokens[i] = self.fields["src"].vocab.itos[src[maxIndex[0]]]
         return tokens
 
+    def buildSrcTokens(self, pred):
+        vocab = self.fields["src_feat_0"].vocab
+        tokens = []
+        for tok in pred:
+            if tok < len(vocab):
+                tokens.append(vocab.itos[tok])
+            if tokens[-1] == onmt.IO.EOS_WORD:
+                tokens = tokens[:-1]
+                break
+        return tokens
+
     def _runTarget(self, batch, data):
 
         _, src_lengths = batch.src
@@ -66,7 +77,7 @@ class Translator(object):
         tgt_in = onmt.IO.make_features(batch, 'tgt')[:-1]
 
         #  (1) run the encoder on the src
-        encStates, context = self.model.encoder(src, src_lengths)
+        encStates, context, labels = self.model.encoder(src, src_lengths)
         decStates = self.model.decoder.init_decoder_state(
                                         src, context, encStates)
 
@@ -94,7 +105,8 @@ class Translator(object):
         # (1) Run the encoder on the src.
         _, src_lengths = batch.src
         src = onmt.IO.make_features(batch, 'src')
-        encStates, context = self.model.encoder(src, src_lengths)
+        encStates, context, labels, labels_free, labels_add = self.model.encoder(src, src_lengths)
+        pred2 = labels.max(2)[1].transpose(0,1)
         decStates = self.model.decoder.init_decoder_state(
                                         src, context, encStates)
 
@@ -190,14 +202,14 @@ class Translator(object):
             allScores.append(scores)
             allAttn.append(attn)
 
-        return allHyps, allScores, allAttn, allGold
+        return allHyps, allScores, allAttn, allGold, pred2
 
     def translate(self, batch, data):
         #  (1) convert words to indexes
         batch_size = batch.batch_size
 
         #  (2) translate
-        pred, predScore, attn, goldScore = self.translateBatch(batch, data)
+        pred, predScore, attn, goldScore, pred2 = self.translateBatch(batch, data)
         assert(len(goldScore) == len(pred))
         pred, predScore, attn, goldScore, i = list(zip(
             *sorted(zip(pred, predScore, attn, goldScore,
@@ -207,10 +219,12 @@ class Translator(object):
 
         #  (3) convert indexes to words
         predBatch, goldBatch = [], []
+        srcBatch = []
         src = batch.src[0].data.index_select(1, perm)
         if self.opt.tgt:
             tgt = batch.tgt.data.index_select(1, perm)
         for b in range(batch_size):
+            srcBatch.append(self.buildSrcTokens(pred2[b].data.cpu().numpy()))
             src_vocab = data.src_vocabs[inds[b]]
             predBatch.append(
                 [self.buildTargetTokens(pred[b][n], src[:, b],
@@ -220,4 +234,5 @@ class Translator(object):
                 goldBatch.append(
                     self.buildTargetTokens(tgt[1:, b], src[:, b],
                                            None, None))
-        return predBatch, goldBatch, predScore, goldScore, attn, src
+        print (srcBatch)
+        return predBatch, goldBatch, predScore, goldScore, attn, src, srcBatch

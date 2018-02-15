@@ -1,3 +1,4 @@
+#!encoding=utf-8
 #!/usr/bin/env python
 
 from __future__ import division
@@ -41,6 +42,11 @@ def get_src_words(src_indices, index2str):
     raw_words = (index2str[i] for i in src_indices)
     words = takewhile(lambda w: w != onmt.IO.PAD_WORD, raw_words)
     return " ".join(words)
+def get_src_words2(src_indices, index2str):
+    words = []
+    raw_words = (index2str[i] for i in src_indices)
+    words = takewhile(lambda w: w != onmt.IO.PAD_WORD, raw_words)
+    return words
 
 
 def main():
@@ -54,6 +60,7 @@ def main():
         torch.cuda.set_device(opt.gpu)
     translator = onmt.Translator(opt, dummy_opt.__dict__)
     out_file = codecs.open(opt.output, 'w', 'utf-8')
+    out_file2 = codecs.open(opt.output+'.features', 'w', 'utf-8')
     pred_score_total, pred_words_total = 0, 0
     gold_score_total, gold_words_total = 0, 0
     if opt.dump_beam != "":
@@ -70,7 +77,7 @@ def main():
 
     counter = count(1)
     for batch in test_data:
-        pred_batch, gold_batch, pred_scores, gold_scores, attn, src \
+        pred_batch, gold_batch, pred_scores, gold_scores, attn, src, tags \
             = translator.translate(batch, data)
         pred_score_total += sum(score[0] for score in pred_scores)
         pred_words_total += sum(len(x[0]) for x in pred_batch)
@@ -86,13 +93,18 @@ def main():
         z_batch = zip_longest(
                 pred_batch, gold_batch,
                 pred_scores, gold_scores,
-                (sent.squeeze(1) for sent in src.split(1, dim=1)))
+                (sent.squeeze(1) for sent in src.split(1, dim=1)), tags)
 
-        for pred_sents, gold_sent, pred_score, gold_score, src_sent in z_batch:
+        for pred_sents, gold_sent, pred_score, gold_score, src_sent, tag in z_batch:
             n_best_preds = [" ".join(pred) for pred in pred_sents[:opt.n_best]]
             out_file.write('\n'.join(n_best_preds))
             out_file.write('\n')
             out_file.flush()
+            words = get_src_words2(
+                src_sent, translator.fields["src"].vocab.itos)
+            out_file2.write(' '.join([u'%s￨%s'%(word, pos) for word,pos in zip(words, tags[0])]))
+            out_file2.write('\n')
+            out_file2.flush()
 
             if opt.verbose:
                 sent_number = next(counter)
@@ -101,6 +113,8 @@ def main():
 
                 os.write(1, bytes('\nSENT %d: %s\n' %
                                   (sent_number, words), 'UTF-8'))
+                os.write(1, bytes('\nPOS %d: %s\n' %
+                                  (sent_number, ' '.join(tags[0])), 'UTF-8'))
 
                 best_pred = n_best_preds[0]
                 best_score = pred_score[0]
