@@ -282,7 +282,7 @@ class RNNDecoderBase(nn.Module):
             self._copy = True
         self._reuse_copy_attn = reuse_copy_attn
 
-    def forward(self, tgt, memory_bank, state, memory_lengths=None):
+    def forward(self, tgt, memory_bank, memory_bank_img, memory_bank_text, state, memory_lengths=None, memory_lengths_text=None):
         """
         Args:
             tgt (`LongTensor`): sequences of padded tokens
@@ -310,7 +310,7 @@ class RNNDecoderBase(nn.Module):
 
         # Run the forward pass of the RNN.
         decoder_final, decoder_outputs, attns = self._run_forward_pass(
-            tgt, memory_bank, state, memory_lengths=memory_lengths)
+            tgt, memory_bank, memory_bank_img, memory_bank_text, state, memory_lengths=memory_lengths, memory_lengths_text=memory_lengths_text)
 
         # Update the state with the result.
         final_output = decoder_outputs[-1]
@@ -326,7 +326,7 @@ class RNNDecoderBase(nn.Module):
 
         return decoder_outputs, state, attns
 
-    def init_decoder_state(self, src, memory_bank, encoder_final):
+    def init_decoder_state(self, src, memory_bank, memory_bank_img, memory_bank_text, encoder_final):
         def _fix_enc_hidden(h):
             # The encoder hidden is  (layers*directions) x batch x dim.
             # We need to convert it to layers x batch x (directions*dim).
@@ -458,7 +458,7 @@ class InputFeedRNNDecoder(RNNDecoderBase):
           G --> H
     """
 
-    def _run_forward_pass(self, tgt, memory_bank, state, memory_lengths=None):
+    def _run_forward_pass(self, tgt, memory_bank, memory_bank_img, memory_bank_text, state, memory_lengths=None, memory_lengths_text=None):
         """
         See StdRNNDecoder._run_forward_pass() for description
         of arguments and return values.
@@ -472,7 +472,7 @@ class InputFeedRNNDecoder(RNNDecoderBase):
 
         # Initialize local and return variables.
         decoder_outputs = []
-        attns = {"std": []}
+        attns = {"std": [], "std_img": [], "std_text": []}
         if self._copy:
             attns["copy"] = []
         if self._coverage:
@@ -492,10 +492,13 @@ class InputFeedRNNDecoder(RNNDecoderBase):
             decoder_input = torch.cat([emb_t, input_feed], 1)
 
             rnn_output, hidden = self.rnn(decoder_input, hidden)
-            decoder_output, p_attn = self.attn(
+            decoder_output, p_attn, p_attn_img, p_attn_text = self.attn(
                 rnn_output,
                 memory_bank.transpose(0, 1),
-                memory_lengths=memory_lengths)
+                memory_bank_img.transpose(0, 1),
+                memory_bank_text.transpose(0, 1),
+                memory_lengths=memory_lengths,
+                memory_lengths_text=memory_lengths_text)
             if self.context_gate is not None:
                 # TODO: context gate should be employed
                 # instead of second RNN transform.
@@ -507,6 +510,8 @@ class InputFeedRNNDecoder(RNNDecoderBase):
 
             decoder_outputs += [decoder_output]
             attns["std"] += [p_attn]
+            attns["std_img"] += [p_attn_img]
+            attns["std_text"] += [p_attn_text]
 
             # Update the coverage attention.
             if self._coverage:
@@ -516,10 +521,12 @@ class InputFeedRNNDecoder(RNNDecoderBase):
 
             # Run the forward pass of the copy attention layer.
             if self._copy and not self._reuse_copy_attn:
+                assert False
                 _, copy_attn = self.copy_attn(decoder_output,
                                               memory_bank.transpose(0, 1))
                 attns["copy"] += [copy_attn]
             elif self._copy:
+                assert False
                 attns["copy"] = attns["std"]
         # Return result.
         return hidden, decoder_outputs, attns
@@ -553,13 +560,14 @@ class NMTModel(nn.Module):
       decoder (:obj:`RNNDecoderBase`): a decoder object
       multi<gpu (bool): setup for multigpu support
     """
-    def __init__(self, encoder, decoder, multigpu=False):
+    def __init__(self, encoder, encoder_text, decoder, multigpu=False):
         self.multigpu = multigpu
         super(NMTModel, self).__init__()
         self.encoder = encoder
+        self.encoder_text = encoder_text
         self.decoder = decoder
 
-    def forward(self, src, tgt, lengths, dec_state=None):
+    def forward(self, src, src_img, src_text, tgt, lengths, lengths_text, dec_state=None):
         """Forward propagate a `src` and `tgt` pair for training.
         Possible initialized with a beginning decoder state.
 
@@ -581,15 +589,19 @@ class NMTModel(nn.Module):
                  * final decoder state
         """
         tgt = tgt[:-1]  # exclude last target from inputs
-
-        enc_final, memory_bank = self.encoder(src, lengths)
+        enc_final_text, memory_bank_text = self.encoder_text(src_text, lengths)
+        enc_final, enc_final_img, memory_bank, memory_bank_img = self.encoder(src, src_img, lengths)
+        enc_f = []
+        for i in range(len(enc_final)):
+            enc_f.append(enc_final[i] + enc_final_img[i] + enc_final_text[i])
+        enc_f = tuple(enc_f)
         enc_state = \
-            self.decoder.init_decoder_state(src, memory_bank, enc_final)
+            self.decoder.init_decoder_state(src, memory_bank, memory_bank_img, memory_bank_text, enc_f)
         decoder_outputs, dec_state, attns = \
-            self.decoder(tgt, memory_bank,
+            self.decoder(tgt, memory_bank, memory_bank_img, memory_bank_text,
                          enc_state if dec_state is None
                          else dec_state,
-                         memory_lengths=lengths)
+                         memory_lengths=lengths, memory_lengths_text=lengths_text)
         if self.multigpu:
             # Not yet supported on multi-gpu
             dec_state = None

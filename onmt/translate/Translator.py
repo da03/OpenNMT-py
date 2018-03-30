@@ -96,24 +96,39 @@ class Translator(object):
 
         # (1) Run the encoder on the src.
         src = onmt.io.make_features(batch, 'src', data_type)
+        src_text = onmt.io.make_features(batch, 'src_text', data_type)
+        src_img = onmt.io.make_features(batch, 'src_img', data_type)
+        _, src_lengths_text = batch.src_text
         src_lengths = None
         if data_type == 'text':
             _, src_lengths = batch.src
 
-        enc_states, memory_bank = self.model.encoder(src, src_lengths)
+        enc_final, enc_final_img, memory_bank, memory_bank_img = self.model.encoder(src, src_img, src_lengths)
+        enc_final_text, memory_bank_text = self.model.encoder_text(src_text, src_lengths_text)
+        enc_f = []
+        for i in range(len(enc_final)):
+            enc_f.append(enc_final[i] + enc_final_img[i] + enc_final_text[i])
+        enc_f = tuple(enc_f)
         dec_states = self.model.decoder.init_decoder_state(
-                                        src, memory_bank, enc_states)
+                                        src, memory_bank, memory_bank_img, memory_bank_text, enc_f)
 
         if src_lengths is None:
             src_lengths = torch.Tensor(batch_size).type_as(memory_bank.data)\
                                                   .long()\
                                                   .fill_(memory_bank.size(0))
+        if src_lengths_text is None:
+            src_lengths_text = torch.Tensor(batch_size).type_as(memory_bank_text.data)\
+                                                  .long()\
+                                                  .fill_(memory_bank_text.size(0))
 
         # (2) Repeat src objects `beam_size` times.
         src_map = rvar(batch.src_map.data) \
             if data_type == 'text' and self.copy_attn else None
         memory_bank = rvar(memory_bank.data)
+        memory_bank_img = rvar(memory_bank_img.data)
         memory_lengths = src_lengths.repeat(beam_size)
+        memory_bank_text = rvar(memory_bank_text.data)
+        memory_lengths_text = src_lengths_text.repeat(beam_size)
         dec_states.repeat_beam_size_times(beam_size)
 
         # (3) run the decoder to generate sentences, using beam search.
@@ -138,7 +153,7 @@ class Translator(object):
 
             # Run one step.
             dec_out, dec_states, attn = self.model.decoder(
-                inp, memory_bank, dec_states, memory_lengths=memory_lengths)
+                inp, memory_bank, memory_bank_img, memory_bank_text, dec_states, memory_lengths=memory_lengths, memory_lengths_text=memory_lengths_text)
             dec_out = dec_out.squeeze(0)
             # dec_out: beam x rnn_size
 
@@ -197,19 +212,26 @@ class Translator(object):
         else:
             src_lengths = None
         src = onmt.io.make_features(batch, 'src', data_type)
+        src_img = onmt.io.make_features(batch, 'src_img', data_type)
+        src_text = onmt.io.make_features(batch, 'src_text', data_type)
         tgt_in = onmt.io.make_features(batch, 'tgt')[:-1]
 
         #  (1) run the encoder on the src
-        enc_states, memory_bank = self.model.encoder(src, src_lengths)
-        dec_states = \
-            self.model.decoder.init_decoder_state(src, memory_bank, enc_states)
+        enc_final, enc_final_img, memory_bank, memory_bank_img = self.model.encoder(src, src_img, src_lengths)
+        enc_final_text, memory_bank_text = self.model.encoder_text(src_text, src_lengths_text)
+        enc_f = []
+        for i in range(len(enc_final)):
+            enc_f.append(enc_final[i] + enc_final_img[i] + enc_final_text[i])
+        enc_f = tuple(enc_f)
+        dec_states = self.model.decoder.init_decoder_state(
+                                        src, memory_bank, memory_bank_img, memory_bank_text, enc_f)
 
         #  (2) if a target is specified, compute the 'goldScore'
         #  (i.e. log likelihood) of the target under the model
         tt = torch.cuda if self.cuda else torch
         gold_scores = tt.FloatTensor(batch.batch_size).fill_(0)
         dec_out, _, _ = self.model.decoder(
-            tgt_in, memory_bank, dec_states, memory_lengths=src_lengths)
+            tgt_in, memory_bank, memory_bank_img, memory_bank_text, dec_states, memory_lengths=src_lengths, memory_lengths_text=src_lengths_text)
 
         tgt_pad = self.fields["tgt"].vocab.stoi[onmt.io.PAD_WORD]
         for dec, tgt in zip(dec_out, batch.tgt[1:].data):

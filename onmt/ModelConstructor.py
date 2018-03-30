@@ -158,6 +158,11 @@ def make_base_model(model_opt, fields, gpu, checkpoint=None):
                                model_opt.brnn,
                                model_opt.rnn_size,
                                model_opt.dropout)
+        src_text_dict = fields["src_text"].vocab
+        feature_dicts = onmt.io.collect_feature_vocabs(fields, 'src_text')
+        src_embeddings = make_embeddings(model_opt, src_text_dict,
+                                         feature_dicts)
+        encoder_text = make_encoder(model_opt, src_embeddings)
     elif model_opt.model_type == "audio":
         encoder = AudioEncoder(model_opt.enc_layers,
                                model_opt.brnn,
@@ -184,7 +189,7 @@ def make_base_model(model_opt, fields, gpu, checkpoint=None):
     decoder = make_decoder(model_opt, tgt_embeddings)
 
     # Make NMTModel(= encoder + decoder).
-    model = NMTModel(encoder, decoder)
+    model = NMTModel(encoder, encoder_text, decoder)
     model.model_type = model_opt.model_type
 
     # Make Generator.

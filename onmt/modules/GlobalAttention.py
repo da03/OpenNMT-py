@@ -74,7 +74,7 @@ class GlobalAttention(nn.Module):
             self.v = nn.Linear(dim, 1, bias=False)
         # mlp wants it with bias
         out_bias = self.attn_type == "mlp"
-        self.linear_out = nn.Linear(dim*2, dim, bias=out_bias)
+        self.linear_out = nn.Linear(dim*4, dim, bias=out_bias)
 
         self.sm = nn.Softmax()
         self.tanh = nn.Tanh()
@@ -125,7 +125,7 @@ class GlobalAttention(nn.Module):
 
             return self.v(wquh.view(-1, dim)).view(tgt_batch, tgt_len, src_len)
 
-    def forward(self, input, memory_bank, memory_lengths=None, coverage=None):
+    def forward(self, input, memory_bank, memory_bank_img, memory_bank_text, memory_lengths=None, memory_lengths_text=None, memory_lengths_img=None, coverage=None):
         """
 
         Args:
@@ -150,6 +150,8 @@ class GlobalAttention(nn.Module):
             one_step = False
 
         batch, sourceL, dim = memory_bank.size()
+        batch_img, sourceL_img, dim_img = memory_bank_img.size()
+        batch_text, sourceL_text, dim_text = memory_bank_text.size()
         batch_, targetL, dim_ = input.size()
         aeq(batch, batch_)
         aeq(dim, dim_)
@@ -160,28 +162,51 @@ class GlobalAttention(nn.Module):
             aeq(sourceL, sourceL_)
 
         if coverage is not None:
+            assert False
             cover = coverage.view(-1).unsqueeze(1)
             memory_bank += self.linear_cover(cover).view_as(memory_bank)
             memory_bank = self.tanh(memory_bank)
 
         # compute attention scores, as in Luong et al.
         align = self.score(input, memory_bank)
+        # compute attention scores, as in Luong et al.
+        align_img = self.score(input, memory_bank_img)
+        # compute attention scores, as in Luong et al.
+        align_text = self.score(input, memory_bank_text)
 
-        if memory_lengths is not None:
-            mask = sequence_mask(memory_lengths)
+        #if memory_lengths is not None:
+        #    mask = sequence_mask(memory_lengths)
+        #    mask = mask.unsqueeze(1)  # Make it broadcastable.
+        #    align.data.masked_fill_(1 - mask, -float('inf'))
+        #if memory_lengths_img is not None:
+        #    mask = sequence_mask(memory_lengths_img)
+        #    mask = mask.unsqueeze(1)  # Make it broadcastable.
+        #    align_img.data.masked_fill_(1 - mask, -float('inf'))
+        if memory_lengths_text is not None:
+            mask = sequence_mask(memory_lengths_text)
             mask = mask.unsqueeze(1)  # Make it broadcastable.
-            align.data.masked_fill_(1 - mask, -float('inf'))
+            align_text.data.masked_fill_(1 - mask, -float('inf'))
 
         # Softmax to normalize attention weights
         align_vectors = self.sm(align.view(batch*targetL, sourceL))
         align_vectors = align_vectors.view(batch, targetL, sourceL)
 
+        # Softmax to normalize attention weights
+        align_img_vectors = self.sm(align_img.view(batch*targetL, sourceL_img))
+        align_img_vectors = align_img_vectors.view(batch, targetL, sourceL_img)
+
+        # Softmax to normalize attention weights
+        align_text_vectors = self.sm(align_text.view(batch*targetL, sourceL_text))
+        align_text_vectors = align_text_vectors.view(batch, targetL, sourceL_text)
+
         # each context vector c_t is the weighted average
         # over all the source hidden states
         c = torch.bmm(align_vectors, memory_bank)
+        c_img = torch.bmm(align_img_vectors, memory_bank_img)
+        c_text = torch.bmm(align_text_vectors, memory_bank_text)
 
         # concatenate
-        concat_c = torch.cat([c, input], 2).view(batch*targetL, dim*2)
+        concat_c = torch.cat([c, c_img, c_text, input], 2).view(batch*targetL, dim*4)
         attn_h = self.linear_out(concat_c).view(batch, targetL, dim)
         if self.attn_type in ["general", "dot"]:
             attn_h = self.tanh(attn_h)
@@ -189,6 +214,8 @@ class GlobalAttention(nn.Module):
         if one_step:
             attn_h = attn_h.squeeze(1)
             align_vectors = align_vectors.squeeze(1)
+            align_img_vectors = align_img_vectors.squeeze(1)
+            align_text_vectors = align_text_vectors.squeeze(1)
 
             # Check output sizes
             batch_, dim_ = attn_h.size()
@@ -200,6 +227,8 @@ class GlobalAttention(nn.Module):
         else:
             attn_h = attn_h.transpose(0, 1).contiguous()
             align_vectors = align_vectors.transpose(0, 1).contiguous()
+            align_img_vectors = align_img_vectors.transpose(0, 1).contiguous()
+            align_text_vectors = align_text_vectors.transpose(0, 1).contiguous()
 
             # Check output sizes
             targetL_, batch_, dim_ = attn_h.size()
@@ -211,4 +240,4 @@ class GlobalAttention(nn.Module):
             aeq(batch, batch_)
             aeq(sourceL, sourceL_)
 
-        return attn_h, align_vectors
+        return attn_h, align_vectors, align_img_vectors, align_text_vectors

@@ -116,9 +116,13 @@ def build_save_dataset(corpus_type, fields, opt):
 
     if corpus_type == 'train':
         src_corpus = opt.train_src
+        src_corpus_img = opt.train_src_pred_img
+        src_corpus_text = opt.train_src_pred_text
         tgt_corpus = opt.train_tgt
     else:
         src_corpus = opt.valid_src
+        src_corpus_img = opt.valid_src_pred_img
+        src_corpus_text = opt.valid_src_pred_text
         tgt_corpus = opt.valid_tgt
 
     # Currently we only do preprocess sharding for corpus: data_type=='text'.
@@ -142,7 +146,7 @@ def build_save_dataset(corpus_type, fields, opt):
                 sample_rate=opt.sample_rate,
                 window_size=opt.window_size,
                 window_stride=opt.window_stride,
-                window=opt.window)
+                window=opt.window, src_pred_img_path=src_corpus_img, src_pred_text_path=src_corpus_text)
 
     # We save fields in vocab.pt seperately, so make it empty.
     dataset.fields = []

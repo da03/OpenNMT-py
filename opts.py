@@ -129,10 +129,18 @@ def preprocess_opts(parser):
 
     group.add_argument('-train_src', required=True,
                        help="Path to the training source data")
+    group.add_argument('-train_src_pred_img', default="",
+                       help="Path to the training source data")
+    group.add_argument('-train_src_pred_text', default="",
+                       help="Path to the training source data")
     group.add_argument('-train_tgt', required=True,
                        help="Path to the training target data")
     group.add_argument('-valid_src', required=True,
                        help="Path to the validation source data")
+    group.add_argument('-valid_src_pred_img', default="",
+                       help="Path to the training source data")
+    group.add_argument('-valid_src_pred_text', default="",
+                       help="Path to the training source data")
     group.add_argument('-valid_tgt', required=True,
                        help="Path to the validation target data")
 
@@ -383,6 +391,10 @@ def translate_opts(parser):
     group.add_argument('-src',   required=True,
                        help="""Source sequence to decode (one line per
                        sequence)""")
+    group.add_argument('-src_pred_img', default="",
+                       help="Path to the training source data")
+    group.add_argument('-src_pred_text', default="",
+                       help="Path to the training source data")
     group.add_argument('-src_dir',   default="",
                        help='Source directory for image or audio files')
     group.add_argument('-tgt',

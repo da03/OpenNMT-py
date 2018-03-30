@@ -210,6 +210,9 @@ class Trainer(object):
             self.valid_loss.cur_dataset = cur_dataset
 
             src = onmt.io.make_features(batch, 'src', self.data_type)
+            src_img = onmt.io.make_features(batch, 'src_img', self.data_type)
+            src_text = onmt.io.make_features(batch, 'src_text', self.data_type)
+            _, src_lengths_text = batch.src_text
             if self.data_type == 'text':
                 _, src_lengths = batch.src
             else:
@@ -218,7 +221,7 @@ class Trainer(object):
             tgt = onmt.io.make_features(batch, 'tgt')
 
             # F-prop through the model.
-            outputs, attns, _ = self.model(src, tgt, src_lengths)
+            outputs, attns, _ = self.model(src, src_img, src_text, tgt, src_lengths, src_lengths_text)
 
             # Compute loss.
             batch_stats = self.valid_loss.monolithic_compute_loss(
@@ -283,6 +286,9 @@ class Trainer(object):
 
             dec_state = None
             src = onmt.io.make_features(batch, 'src', self.data_type)
+            src_img = onmt.io.make_features(batch, 'src_img', self.data_type)
+            src_text = onmt.io.make_features(batch, 'src_text', self.data_type)
+            _, src_lengths_text = batch.src_text
             if self.data_type == 'text':
                 _, src_lengths = batch.src
                 report_stats.n_src_words += src_lengths.sum()
@@ -299,7 +305,7 @@ class Trainer(object):
                 if self.grad_accum_count == 1:
                     self.model.zero_grad()
                 outputs, attns, dec_state = \
-                    self.model(src, tgt, src_lengths, dec_state)
+                    self.model(src, src_img, src_text, tgt, src_lengths, src_lengths_text, dec_state)
 
                 # 3. Compute loss in shards for memory efficiency.
                 batch_stats = self.train_loss.sharded_compute_loss(

@@ -70,10 +70,10 @@ class ImageDataset(ONMTDatasetBase):
 
     def sort_key(self, ex):
         """ Sort using the size of the image: (width, height)."""
-        return (ex.src.size(2), ex.src.size(1))
+        return (len(ex.src_text), ex.src.size(2), ex.src.size(1))
 
     @staticmethod
-    def make_image_examples_nfeats_tpl(path, img_dir):
+    def make_image_examples_nfeats_tpl(path, img_dir, pred_img_path, pred_text_path):
         """
         Args:
             path (str): location of a src file containing image paths
@@ -82,13 +82,13 @@ class ImageDataset(ONMTDatasetBase):
         Returns:
             (example_dict iterator, num_feats) tuple
         """
-        examples_iter = ImageDataset.read_img_file(path, img_dir, 'src')
+        examples_iter = ImageDataset.read_img_file(path, img_dir, 'src', pred_img_path, pred_text_path)
         num_feats = 0  # Source side(img) has no features.
 
         return (examples_iter, num_feats)
 
     @staticmethod
-    def read_img_file(path, src_dir, side, truncate=None):
+    def read_img_file(path, src_dir, side, pred_img_path, pred_text_path, truncate=None):
         """
         Args:
             path (str): location of a src file containing image paths
@@ -107,27 +107,41 @@ class ImageDataset(ONMTDatasetBase):
         from torchvision import transforms
 
         with codecs.open(path, "r", "utf-8") as corpus_file:
-            index = 0
-            for line in corpus_file:
-                img_path = os.path.join(src_dir, line.strip())
-                if not os.path.exists(img_path):
-                    img_path = line
+            with codecs.open(pred_img_path, "r", "utf-8") as corpus_file_pred_img:
+                with codecs.open(pred_text_path, "r", "utf-8") as corpus_file_pred_text:
+                    index = 0
+                    for line, line_img, line_text in zip(corpus_file, corpus_file_pred_img, corpus_file_pred_text):
+                        img_path = os.path.join(src_dir, line.strip())
+                        if not os.path.exists(img_path):
+                            img_path = line
+                        if not os.path.exists(img_path):
+                            print 'img path %s not found' % (line.strip())
+                            img = torch.Tensor(3,64,64).fill_(1)
+                        else:
+                            img = transforms.ToTensor()(Image.open(img_path))
+                        if truncate and truncate != (0, 0):
+                            assert False
 
-                assert os.path.exists(img_path), \
-                    'img path %s not found' % (line.strip())
+                        img_path = os.path.join(src_dir, line_img.strip())
+                        if not os.path.exists(img_path):
+                            img_path = line
+                        if not os.path.exists(img_path):
+                            print 'img path %s not found' % (line_img.strip())
+                            img_img = torch.Tensor(3,64,64).fill_(1)
+                        else:
+                            img_img = transforms.ToTensor()(Image.open(img_path))
+                        if truncate and truncate != (0, 0):
+                            assert False
 
-                img = transforms.ToTensor()(Image.open(img_path))
-                if truncate and truncate != (0, 0):
-                    if not (img.size(1) <= truncate[0]
-                            and img.size(2) <= truncate[1]):
-                        continue
+                        example_dict = {side: img,
+                                        side+'_path': line.strip(),
+                                        side+'_img': img_img,
+                                        side+'_img_path': line_img.strip(),
+                                        side+'_text': line_text.strip().split(),
+                                        'indices': index}
+                        index += 1
 
-                example_dict = {side: img,
-                                side+'_path': line.strip(),
-                                'indices': index}
-                index += 1
-
-                yield example_dict
+                        yield example_dict
 
     @staticmethod
     def get_fields(n_src_features, n_tgt_features):
@@ -148,7 +162,7 @@ class ImageDataset(ONMTDatasetBase):
             c = data[0].size(0)
             h = max([t.size(1) for t in data])
             w = max([t.size(2) for t in data])
-            imgs = torch.zeros(len(data), c, h, w)
+            imgs = torch.zeros(len(data), c, h, w).fill_(1)
             for i, img in enumerate(data):
                 imgs[i, :, 0:img.size(1), 0:img.size(2)] = img
             return imgs
@@ -157,11 +171,20 @@ class ImageDataset(ONMTDatasetBase):
             use_vocab=False, tensor_type=torch.FloatTensor,
             postprocessing=make_img, sequential=False)
 
+        fields["src_img"] = torchtext.data.Field(
+            use_vocab=False, tensor_type=torch.FloatTensor,
+            postprocessing=make_img, sequential=False)
+
         for j in range(n_src_features):
             fields["src_feat_"+str(j)] = \
                 torchtext.data.Field(pad_token=PAD_WORD)
 
         fields["tgt"] = torchtext.data.Field(
+            init_token=BOS_WORD, eos_token=EOS_WORD,
+            pad_token=PAD_WORD)
+
+        fields["src_text"] = torchtext.data.Field(
+            include_lengths=True,
             init_token=BOS_WORD, eos_token=EOS_WORD,
             pad_token=PAD_WORD)
 

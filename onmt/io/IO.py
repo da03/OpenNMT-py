@@ -124,7 +124,7 @@ def make_features(batch, side, data_type='text'):
         A sequence of src/tgt tensors with optional feature tensors
         of size (len x batch).
     """
-    assert side in ['src', 'tgt']
+    assert side in ['src', 'src_img', 'src_text', 'tgt']
     if isinstance(batch.__dict__[side], tuple):
         data = batch.__dict__[side][0]
     else:
@@ -135,7 +135,7 @@ def make_features(batch, side, data_type='text'):
     features = [batch.__dict__[k] for k in keys]
     levels = [data] + features
 
-    if data_type == 'text':
+    if data_type == 'text' or side == 'src_text':
         return torch.cat([level.unsqueeze(2) for level in levels], 2)
     else:
         return levels[0]
@@ -159,7 +159,7 @@ def collect_feature_vocabs(fields, side):
     """
     Collect feature Vocab objects from Field object.
     """
-    assert side in ['src', 'tgt']
+    assert side in ['src', 'src_text', 'tgt']
     feature_vocabs = []
     for j in count():
         key = side + "_feat_" + str(j)
@@ -174,7 +174,7 @@ def build_dataset(fields, data_type, src_path, tgt_path, src_dir=None,
                   src_seq_length_trunc=0, tgt_seq_length_trunc=0,
                   dynamic_dict=True, sample_rate=0,
                   window_size=0, window_stride=0, window=None,
-                  normalize_audio=True, use_filter_pred=True):
+                  normalize_audio=True, use_filter_pred=True, src_pred_img_path='', src_pred_text_path=''):
 
     # Build src/tgt examples iterator from corpus files, also extract
     # number of features.
@@ -182,7 +182,7 @@ def build_dataset(fields, data_type, src_path, tgt_path, src_dir=None,
         _make_examples_nfeats_tpl(data_type, src_path, src_dir,
                                   src_seq_length_trunc, sample_rate,
                                   window_size, window_stride,
-                                  window, normalize_audio)
+                                  window, normalize_audio, src_pred_img_path=src_pred_img_path, src_pred_text_path=src_pred_text_path)
 
     # For all data types, the tgt side corpus is in form of text.
     tgt_examples_iter, num_tgt_feats = \
@@ -292,6 +292,12 @@ def build_vocab(train_dataset_files, fields, data_type, share_vocab,
                 vocab_size=src_vocab_size)
             fields["src"].vocab = merged_vocab
             fields["tgt"].vocab = merged_vocab
+    if data_type == 'img':
+        _build_field_vocab(fields["src_text"], counter["src_text"],
+                           max_size=src_vocab_size,
+                           min_freq=src_words_min_frequency)
+        print(" * src pred text vocab size: %d." % len(fields["src_text"].vocab))
+
 
     return fields
 
@@ -299,7 +305,7 @@ def build_vocab(train_dataset_files, fields, data_type, share_vocab,
 def _make_examples_nfeats_tpl(data_type, src_path, src_dir,
                               src_seq_length_trunc, sample_rate,
                               window_size, window_stride,
-                              window, normalize_audio):
+                              window, normalize_audio, src_pred_img_path, src_pred_text_path):
     """
     Process the corpus into (example_dict iterator, num_feats) tuple
     on source side for different 'data_type'.
@@ -313,7 +319,7 @@ def _make_examples_nfeats_tpl(data_type, src_path, src_dir,
     elif data_type == 'img':
         src_examples_iter, num_src_feats = \
             ImageDataset.make_image_examples_nfeats_tpl(
-                src_path, src_dir)
+                src_path, src_dir, src_pred_img_path, src_pred_text_path)
 
     elif data_type == 'audio':
         src_examples_iter, num_src_feats = \
