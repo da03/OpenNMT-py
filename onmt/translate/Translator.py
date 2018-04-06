@@ -211,6 +211,7 @@ class Translator(object):
             _, src_lengths = batch.src
         else:
             src_lengths = None
+        _, src_lengths_text = batch.src_text
         src = onmt.io.make_features(batch, 'src', data_type)
         src_img = onmt.io.make_features(batch, 'src_img', data_type)
         src_text = onmt.io.make_features(batch, 'src_text', data_type)
