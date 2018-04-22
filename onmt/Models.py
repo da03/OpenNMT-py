@@ -165,7 +165,7 @@ class RNNEncoder(EncoderBase):
 
         # Build a linear layer for each
         self.bridge = nn.ModuleList([nn.Linear(self.total_hidden_dim,
-                                               500 * num_layers,
+                                               int(hidden_size * num_layers / 2),
                                                bias=True)
                                      for i in range(number_of_states)])
 
