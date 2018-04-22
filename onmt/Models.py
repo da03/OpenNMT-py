@@ -165,7 +165,7 @@ class RNNEncoder(EncoderBase):
 
         # Build a linear layer for each
         self.bridge = nn.ModuleList([nn.Linear(self.total_hidden_dim,
-                                               self.total_hidden_dim,
+                                               500 * num_layers,
                                                bias=True)
                                      for i in range(number_of_states)])
 
@@ -179,7 +179,7 @@ class RNNEncoder(EncoderBase):
             """
             size = states.size()
             result = linear(states.view(-1, self.total_hidden_dim))
-            return F.relu(result).view(size)
+            return F.relu(result).view(size[0], size[1], -1)
 
         if isinstance(hidden, tuple):  # LSTM
             outs = tuple([bottle_hidden(layer, hidden[ix])
